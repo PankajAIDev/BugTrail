@@ -8,6 +8,7 @@ export const isSupabaseConfigured = (): boolean => {
     supabaseUrl &&
     supabaseAnonKey &&
     supabaseUrl !== 'https://xyz.supabase.co' &&
+    supabaseUrl !== 'https://your-project-id.supabase.co' &&
     supabaseUrl.startsWith('https://') &&
     supabaseAnonKey.length > 20
   );
@@ -21,7 +22,8 @@ if (isSupabaseConfigured()) {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: true,
+        storageKey: 'bugtrail_supabase_auth_token'
       }
     });
   } catch (err) {
@@ -31,6 +33,10 @@ if (isSupabaseConfigured()) {
 }
 
 export const supabase = client;
+
+// ==============================================================================
+// Schema Type Definitions
+// ==============================================================================
 
 export interface ProfileRecord {
   id: string;
@@ -44,7 +50,7 @@ export interface UserProgressRecord {
   id: string;
   user_id: string;
   challenge_id: string;
-  status: 'attempted' | 'completed';
+  status: 'not_started' | 'in_progress' | 'attempted' | 'completed';
   attempts: number;
   hints_revealed: number;
   completed_at: string | null;
@@ -55,8 +61,25 @@ export interface UserProgressRecord {
 export interface LearningStatsRecord {
   user_id: string;
   total_xp: number;
-  streak_days: number;
   completed_challenges: number;
-  last_active_date: string | null;
+  current_streak: number;
+  longest_streak: number;
+  last_activity_at: string | null;
   updated_at: string;
+}
+
+export interface AchievementRecord {
+  id: string;
+  user_id: string;
+  achievement_key: string;
+  unlocked_at: string;
+}
+
+export interface LearningActivityRecord {
+  id: string;
+  user_id: string;
+  activity_type: 'challenge_attempt' | 'challenge_completed' | 'hint_revealed' | 'code_scanned' | 'tutor_query';
+  challenge_id: string | null;
+  metadata: Record<string, any>;
+  created_at: string;
 }

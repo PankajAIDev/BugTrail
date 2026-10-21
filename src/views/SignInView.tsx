@@ -25,13 +25,16 @@ export const SignInView: React.FC<SignInViewProps> = ({
   onNavigateToSignUp,
   onNavigateToHome
 }) => {
-  const { signIn, signInWithGoogle, resetPassword, isConfigured } = useAuth();
+  const { signIn, signInWithGoogle, resetPassword, resendConfirmationEmail, loginAsGuest, isConfigured } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isEmailUnconfirmed, setIsEmailUnconfirmed] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
 
   // Forgot password modal
   const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
@@ -61,14 +64,23 @@ export const SignInView: React.FC<SignInViewProps> = ({
       if (error) {
         if (error.message.includes('Invalid login credentials')) {
           setErrorMsg('Invalid email or password. Please double check and try again.');
-        } else if (error.message.includes('Email not confirmed')) {
+          setIsEmailUnconfirmed(false);
+        } else if (
+          error.message.includes('Email not confirmed') ||
+          error.message.toLowerCase().includes('not confirmed') ||
+          error.message.toLowerCase().includes('confirm your email')
+        ) {
           setErrorMsg('Your email address has not been confirmed yet. Please check your inbox.');
+          setIsEmailUnconfirmed(true);
         } else if (error.message.includes('Rate limit exceeded')) {
           setErrorMsg('Too many login attempts. Please wait a few moments before trying again.');
+          setIsEmailUnconfirmed(false);
         } else {
           setErrorMsg(error.message);
+          setIsEmailUnconfirmed(false);
         }
       } else {
+        setIsEmailUnconfirmed(false);
         onNavigateToHome();
       }
     } catch (err: any) {
@@ -187,6 +199,71 @@ export const SignInView: React.FC<SignInViewProps> = ({
                 <div className="bg-[#FFB8B0] border-2 border-[#2F2E33] rounded-xl p-3.5 flex items-start gap-3 text-[#2F2E33] text-xs font-extrabold shadow-[2px_2px_0px_#2F2E33] animate-in fade-in">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#2F2E33]" />
                   <span>{errorMsg}</span>
+                </div>
+              )}
+
+              {/* Unconfirmed Email Action Box */}
+              {isEmailUnconfirmed && (
+                <div className="bg-[#FFF9F4] border-2 border-[#2F2E33] rounded-2xl p-4 space-y-3 shadow-[3px_3px_0px_#2F2E33] animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-extrabold text-[#2F2E33] flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-[#24C566]" />
+                      Email Confirmation Resolution
+                    </span>
+                    {resendSuccess && (
+                      <span className="text-[10px] font-mono font-extrabold text-[#24C566] bg-[#9AF7A0] px-2 py-0.5 rounded-md border border-[#2F2E33]">
+                        Link Sent!
+                      </span>
+                    )}
+                  </div>
+                  
+                  <p className="text-xs font-bold text-[#858B98] leading-relaxed">
+                    If you haven&apos;t received the activation link or want to practice right away, choose an option below:
+                  </p>
+
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loginAsGuest(email.trim(), email.split('@')[0]);
+                        onNavigateToHome();
+                      }}
+                      className="btn-primary w-full text-xs py-2.5 flex items-center justify-center gap-2"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Instant Access with This Account</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isResending}
+                      onClick={async () => {
+                        setIsResending(true);
+                        setResendSuccess(false);
+                        try {
+                          const { error } = await resendConfirmationEmail(email.trim());
+                          if (error) {
+                            setErrorMsg(error.message);
+                          } else {
+                            setResendSuccess(true);
+                          }
+                        } catch (err: any) {
+                          setErrorMsg(err.message || 'Failed to resend confirmation email.');
+                        } finally {
+                          setIsResending(false);
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-white text-[#2F2E33] border-2 border-[#2F2E33] rounded-xl text-xs font-extrabold shadow-[2px_2px_0px_#2F2E33] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>{isResending ? 'Resending Link...' : 'Resend Confirmation Email'}</span>
+                    </button>
+                  </div>
+
+                  <div className="border-t border-[#E4E1DF] pt-2 text-[10px] font-mono font-bold text-[#858B98]">
+                    Tip: In Supabase Dashboard &gt; Authentication &gt; Providers &gt; Email, turn off &quot;Confirm email&quot; to allow password-only logins without email verification.
+                  </div>
                 </div>
               )}
 

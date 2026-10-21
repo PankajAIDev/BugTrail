@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Award, Flame, Menu, X, Bug, User, LogOut, ShieldCheck, Database } from 'lucide-react';
 import { LevelInfo } from '../utils/storage';
 import { useAuth } from '../context/AuthContext';
@@ -13,7 +13,8 @@ export type AppTab =
   | 'scanner'
   | 'signin'
   | 'signup'
-  | 'reset-password';
+  | 'reset-password'
+  | '404';
 
 interface NavbarProps {
   currentTab: AppTab;
@@ -32,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const { user, profile, signOut, isConfigured } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
 
   const navItems: { id: AppTab; label: string; isNew?: boolean }[] = [
     { id: 'landing', label: 'Home' },
@@ -52,17 +54,40 @@ export const Navbar: React.FC<NavbarProps> = ({
     handleNavClick('landing');
   };
 
+  // Close mobile menu on Escape key press
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && mobileMenuOpen) {
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [mobileMenuOpen]);
+
+  // Close mobile menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mobileMenuOpen && headerRef.current && !headerRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mobileMenuOpen]);
+
   const displayName = profile?.display_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || null;
 
   return (
-    <header className="sticky top-3 z-40 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
+    <header ref={headerRef} className="sticky top-3 z-40 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-4">
       <div className="bg-white border-[2.5px] border-[#2F2E33] rounded-2xl shadow-[4px_4px_0px_#2F2E33] px-4 sm:px-6 py-3 transition-all">
         <div className="flex items-center justify-between gap-4">
           
-          {/* Logo Brand */}
+          {/* Logo Brand: clickable and navigates to appropriate route */}
           <button
-            onClick={() => handleNavClick('landing')}
-            className="flex items-center gap-2.5 text-left focus-visible:outline-none rounded-xl group shrink-0 transition-transform hover:-translate-y-0.5 active:translate-y-0"
+            onClick={() => handleNavClick(user ? 'dashboard' : 'landing')}
+            aria-label="BugTrail AI Home"
+            className="flex items-center gap-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566] rounded-xl group shrink-0 transition-transform hover:-translate-y-0.5 active:translate-y-0"
           >
             <div className="w-10 h-10 rounded-xl bg-[#24C566] border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] flex items-center justify-center text-[#2F2E33]">
               <Bug className="w-5 h-5 stroke-[2.5]" />
@@ -85,14 +110,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1 lg:gap-2 text-sm font-bold">
+          <nav className="hidden md:flex items-center gap-1 lg:gap-2 text-sm font-bold" aria-label="Main Navigation">
             {navItems.map((item) => {
               const isActive = currentTab === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
-                  className={`relative px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`relative px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566] ${
                     isActive
                       ? 'bg-[#E5E0FA] text-[#2F2E33] border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33]'
                       : 'text-[#2F2E33] hover:bg-[#FFF9F4] hover:border-2 hover:border-[#2F2E33]'
@@ -125,7 +151,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Total XP */}
             <button
               onClick={() => handleNavClick('progress')}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#2F2E33] bg-[#9AF7A0] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33] hover:-translate-y-0.5 active:translate-y-0 transition-transform"
+              title={`Level ${levelInfo.levelNumber}: ${totalXp} Total XP earned`}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#2F2E33] bg-[#9AF7A0] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33] hover:-translate-y-0.5 active:translate-y-0 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566]"
             >
               <Award className="w-4 h-4" />
               <span className="font-mono">{totalXp} XP</span>
@@ -134,14 +161,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Auth Buttons / Profile Indicator */}
             {displayName ? (
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-extrabold text-[#2F2E33] bg-[#ADDCE8] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33]">
-                  <User className="w-4 h-4" />
+                <div
+                  title={`Signed in as ${displayName}`}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-extrabold text-[#2F2E33] bg-[#ADDCE8] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33]"
+                >
+                  <User className="w-4 h-4 shrink-0" />
                   <span className="max-w-[110px] truncate">{displayName}</span>
                 </div>
                 <button
                   onClick={handleSignOut}
                   title="Sign Out"
-                  className="p-2 text-[#2F2E33] bg-[#FFF9F4] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33] hover:bg-rose-100 transition-colors"
+                  aria-label="Sign Out"
+                  className="p-2 text-[#2F2E33] bg-[#FFF9F4] border-2 border-[#2F2E33] rounded-xl shadow-[2px_2px_0px_#2F2E33] hover:bg-rose-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566]"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -150,7 +181,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleNavClick('signin')}
-                  className={`px-3.5 py-1.5 text-xs font-extrabold rounded-xl border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] transition-all ${
+                  className={`px-3.5 py-1.5 text-xs font-extrabold rounded-xl border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566] ${
                     currentTab === 'signin' ? 'bg-[#24C566] text-[#2F2E33]' : 'bg-[#ADDCE8] text-[#2F2E33]'
                   }`}
                 >
@@ -158,37 +189,42 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
                 <button
                   onClick={() => handleNavClick('signup')}
-                  className={`hidden sm:inline-flex px-3.5 py-1.5 text-xs font-extrabold rounded-xl border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] transition-all ${
-                    currentTab === 'signup' ? 'bg-[#24C566] text-[#2F2E33]' : 'bg-[#24C566] text-[#2F2E33]'
-                  }`}
+                  className="hidden sm:inline-flex px-3.5 py-1.5 text-xs font-extrabold rounded-xl border-2 border-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] transition-all bg-[#24C566] text-[#2F2E33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566]"
                 >
                   Sign Up
                 </button>
               </div>
             )}
 
-            {/* Mobile Menu Button */}
+            {/* Mobile Menu Button with accessible labels & state */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-[#2F2E33] border-2 border-[#2F2E33] rounded-xl bg-[#FFF9F4] shadow-[2px_2px_0px_#2F2E33]"
-              aria-label="Toggle Menu"
+              className="md:hidden p-2 text-[#2F2E33] border-2 border-[#2F2E33] rounded-xl bg-[#FFF9F4] shadow-[2px_2px_0px_#2F2E33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#24C566]"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-navigation-drawer"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
-        {/* Mobile Dropdown */}
+        {/* Mobile Navigation Drawer */}
         {mobileMenuOpen && (
-          <div className="md:hidden pt-4 mt-3 border-t-2 border-[#2F2E33] flex flex-col gap-2">
+          <nav
+            id="mobile-navigation-drawer"
+            aria-label="Mobile Navigation Drawer"
+            className="md:hidden pt-4 mt-3 border-t-2 border-[#2F2E33] flex flex-col gap-2 animate-in slide-in-from-top-2 duration-150"
+          >
             {navItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => handleNavClick(item.id)}
-                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-between border-2 border-[#2F2E33] ${
+                aria-current={currentTab === item.id ? 'page' : undefined}
+                className={`w-full text-left px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-between border-2 border-[#2F2E33] transition-all ${
                   currentTab === item.id
                     ? 'bg-[#E5E0FA] shadow-[2px_2px_0px_#2F2E33]'
-                    : 'bg-white'
+                    : 'bg-white hover:bg-[#FFF9F4]'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -225,7 +261,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 Sign Out ({displayName})
               </button>
             )}
-          </div>
+          </nav>
         )}
       </div>
     </header>

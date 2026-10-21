@@ -25,7 +25,7 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
   onNavigateToSignIn,
   onNavigateToHome
 }) => {
-  const { signUp, signInWithGoogle, isConfigured } = useAuth();
+  const { signUp, signInWithGoogle, resendConfirmationEmail, activateInstantSession, isConfigured } = useAuth();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -34,10 +34,13 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeTerms, setAgreeTerms] = useState(false);
+  const [autoInstantAccess, setAutoInstantAccess] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isConfirmationSent, setIsConfirmationSent] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
 
   // Password strength logic
   const calculatePasswordStrength = (pass: string) => {
@@ -89,7 +92,7 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
     setIsLoading(true);
 
     try {
-      const { error, needConfirmation } = await signUp(email.trim(), password, fullName.trim());
+      const { error, needConfirmation, user } = await signUp(email.trim(), password, fullName.trim());
 
       if (error) {
         if (error.message.includes('already registered')) {
@@ -98,7 +101,13 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
           setErrorMsg(error.message);
         }
       } else if (needConfirmation) {
-        setIsConfirmationSent(true);
+        if (autoInstantAccess) {
+          // Immediately establish active session so user is never blocked by unconfirmed email!
+          activateInstantSession(email.trim(), fullName.trim(), user?.id);
+          onNavigateToHome();
+        } else {
+          setIsConfirmationSent(true);
+        }
       } else {
         onNavigateToHome();
       }
@@ -186,23 +195,89 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
 
             {/* Confirmation Pending Card */}
             {isConfirmationSent ? (
-              <div className="bg-[#9AF7A0] border-2 border-[#2F2E33] rounded-2xl p-6 space-y-4 shadow-[4px_4px_0px_#2F2E33] animate-in fade-in">
-                <div className="w-12 h-12 rounded-xl bg-white border-2 border-[#2F2E33] flex items-center justify-center text-[#2F2E33] shadow-[2px_2px_0px_#2F2E33]">
-                  <CheckCircle2 className="w-6 h-6 text-[#24C566]" />
+              <div className="bg-[#FFF9F4] border-2 border-[#2F2E33] rounded-2xl p-6 space-y-4 shadow-[4px_4px_0px_#2F2E33] animate-in fade-in">
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-[#9AF7A0] border-2 border-[#2F2E33] flex items-center justify-center text-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] shrink-0">
+                    <CheckCircle2 className="w-6 h-6 text-[#24C566]" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-extrabold font-display text-[#2F2E33]">Account Created!</h3>
+                    <p className="text-xs font-bold text-[#858B98]">
+                      Verification link was sent to <span className="font-mono text-[#2F2E33] underline font-extrabold">{email}</span>.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <h3 className="text-lg font-extrabold font-display text-[#2F2E33]">Verification Email Sent</h3>
-                  <p className="text-xs font-bold text-[#2F2E33] leading-relaxed">
-                    We sent a confirmation link to <span className="font-mono underline">{email}</span>. Please click the link in your email to activate your account!
+
+                <div className="p-3.5 bg-[#E5E0FA] border-2 border-[#2F2E33] rounded-xl text-xs font-bold text-[#2F2E33] space-y-1.5 shadow-[2px_2px_0px_#2F2E33]">
+                  <div className="flex items-center gap-2 font-extrabold font-display text-[#2F2E33]">
+                    <Sparkles className="w-4 h-4 text-[#24C566]" />
+                    <span>Instant Access Available</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-[#2F2E33]/85">
+                    Don&apos;t want to wait or didn&apos;t receive the email? You can activate your account immediately and start coding right now.
                   </p>
                 </div>
-                <button
-                  onClick={onNavigateToSignIn}
-                  className="btn-primary w-full text-sm py-3 flex items-center justify-center gap-2"
-                >
-                  <span>Go to Sign In Page</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+
+                {resendStatus && (
+                  <div className="p-3 bg-[#ADDCE8] border-2 border-[#2F2E33] rounded-xl text-[#2F2E33] text-xs font-bold shadow-[2px_2px_0px_#2F2E33] flex items-center gap-2">
+                    <Mail className="w-4 h-4 shrink-0 text-[#2F2E33]" />
+                    <span>{resendStatus}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      activateInstantSession(email.trim(), fullName.trim());
+                      onNavigateToHome();
+                    }}
+                    className="btn-primary w-full text-sm py-3.5 flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Start Learning Now (Instant Access)</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={isResending}
+                      onClick={async () => {
+                        setIsResending(true);
+                        setResendStatus(null);
+                        try {
+                          const { error } = await resendConfirmationEmail(email.trim());
+                          if (error) {
+                            setResendStatus(error.message);
+                          } else {
+                            setResendStatus('Confirmation email sent! Please check your spam folder.');
+                          }
+                        } catch (e: any) {
+                          setResendStatus(e.message || 'Failed to resend confirmation email.');
+                        } finally {
+                          setIsResending(false);
+                        }
+                      }}
+                      className="py-2.5 px-3 bg-white border-2 border-[#2F2E33] rounded-xl text-xs font-extrabold text-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>{isResending ? 'Sending...' : 'Resend Email'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={onNavigateToSignIn}
+                      className="py-2.5 px-3 bg-[#ADDCE8] border-2 border-[#2F2E33] rounded-xl text-xs font-extrabold text-[#2F2E33] shadow-[2px_2px_0px_#2F2E33] hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <span>Sign In Page</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#E4E1DF] pt-3 text-[10px] font-mono font-bold text-[#858B98]">
+                  Tip: In Supabase Dashboard &gt; Auth &gt; Providers &gt; Email, turn off &quot;Confirm email&quot; for instant password login without verification emails.
+                </div>
               </div>
             ) : (
               /* Form */
@@ -358,6 +433,28 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
                     className="text-xs font-bold text-[#2F2E33] cursor-pointer leading-tight select-none"
                   >
                     I agree to the <span className="underline">Terms of Service</span> and acknowledge privacy policies.
+                  </label>
+                </div>
+
+                {/* Instant Access Option */}
+                <div className="flex items-center gap-2.5 p-2.5 bg-[#FFF9F4] border-2 border-[#2F2E33] rounded-xl text-xs font-bold shadow-[2px_2px_0px_#2F2E33]">
+                  <button
+                    type="button"
+                    onClick={() => setAutoInstantAccess(!autoInstantAccess)}
+                    className={`w-4 h-4 rounded border-2 border-[#2F2E33] flex items-center justify-center shrink-0 transition-all ${
+                      autoInstantAccess
+                        ? 'bg-[#24C566] text-[#2F2E33]'
+                        : 'bg-white'
+                    }`}
+                  >
+                    {autoInstantAccess && <Check className="w-3 h-3 stroke-[3]" />}
+                  </button>
+                  <label
+                    onClick={() => setAutoInstantAccess(!autoInstantAccess)}
+                    className="cursor-pointer text-[#2F2E33] flex items-center gap-1.5 select-none text-[11px]"
+                  >
+                    <Sparkles className="w-3 h-3 text-[#24C566] shrink-0" />
+                    <span>Auto-activate account instantly (no email verification wait)</span>
                   </label>
                 </div>
 

@@ -8,61 +8,102 @@ import {
   formatDate,
   getLevelInfo
 } from '../utils/storage';
-import { db } from '../lib/firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { supabase, isSupabaseConfigured, UserProgressRecord, LearningStatsRecord, AchievementRecord, LearningActivityRecord } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
-export function useProgress() {
-  const { user } = useAuth();
+export interface ProgressHookReturn {
+  progress: UserProgress;
+  levelInfo: ReturnType<typeof getLevelInfo>;
+  totalSubmissions: number;
+  totalSolved: number;
+  accuracyPercent: number;
+  isSyncing: boolean;
+  syncError: string | null;
+  achievements: AchievementRecord[];
+  recentActivity: LearningActivityRecord[];
+  recordSubmission: (challengeId: string, isCorrect: boolean, optionId: string, xpReward: number) => Promise<void>;
+  revealHint: (challengeId: string, currentHintLevel: number) => Promise<void>;
+  resetProgress: () => Promise<void>;
+  retrySync: () => Promise<void>;
+}
+
+export function useProgress(): ProgressHookReturn {
+  const { user, isConfigured } = useAuth();
   const [progress, setProgress] = useState<UserProgress>(loadUserProgress);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [achievements, setAchievements] = useState<AchievementRecord[]>([]);
+  const [recentActivity, setRecentActivity] = useState<LearningActivityRecord[]>([]);
 
-  // Load progress from Firestore when user logs in
-  const fetchFirestoreProgress = useCallback(async (userId: string) => {
+  // Load complete progress from Supabase PostgreSQL
+  const fetchSupabaseProgress = useCallback(async (userId: string) => {
+    if (!isConfigured || !supabase) return;
     setIsSyncing(true);
     setSyncError(null);
 
     try {
-      // Fetch user profile stats
-      const userDocRef = doc(db, 'users', userId);
-      const userSnap = await getDoc(userDocRef);
+      // 1. Fetch user progress records
+      const { data: progressRows, error: progressErr } = await supabase
+        .from('user_progress')
+        .select('*')
+        .eq('user_id', userId);
 
-      let totalXp = 0;
-      let streakDays = 1;
-      let lastActiveDate = '';
+      if (progressErr) throw progressErr;
 
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        totalXp = userData.totalXp || 0;
-        streakDays = userData.streakDays || 1;
-        lastActiveDate = userData.updatedAt ? formatDate(new Date(userData.updatedAt)) : '';
+      // 2. Fetch learning stats
+      const { data: statsRow, error: statsErr } = await supabase
+        .from('learning_stats')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (statsErr) console.warn('Could not retrieve learning stats:', statsErr);
+
+      // 3. Fetch unlocked achievements
+      const { data: achievementsRows } = await supabase
+        .from('achievements')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (achievementsRows) {
+        setAchievements(achievementsRows as AchievementRecord[]);
       }
 
-      // Fetch progress subcollection
-      const progressColRef = collection(db, 'users', userId, 'progress');
-      const progressSnap = await getDocs(progressColRef);
+      // 4. Fetch recent learning activity
+      const { data: activityRows } = await supabase
+        .from('learning_activity')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(15);
+
+      if (activityRows) {
+        setRecentActivity(activityRows as LearningActivityRecord[]);
+      }
 
       const completedChallengeIds: string[] = [];
       const attempts: Record<string, { totalAttempts: number; isCorrect: boolean; timestamp: number }> = {};
       const hintsRevealed: Record<string, number> = {};
 
-      progressSnap.forEach((docSnap) => {
-        const data = docSnap.data();
-        const chId = data.challengeId || docSnap.id;
+      if (progressRows) {
+        (progressRows as UserProgressRecord[]).forEach((row) => {
+          if (row.status === 'completed') {
+            completedChallengeIds.push(row.challenge_id);
+          }
+          attempts[row.challenge_id] = {
+            totalAttempts: row.attempts || 1,
+            isCorrect: row.status === 'completed',
+            timestamp: new Date(row.updated_at).getTime()
+          };
+          if (row.hints_revealed) {
+            hintsRevealed[row.challenge_id] = row.hints_revealed;
+          }
+        });
+      }
 
-        if (data.status === 'completed') {
-          completedChallengeIds.push(chId);
-        }
-        attempts[chId] = {
-          totalAttempts: data.attempts || 1,
-          isCorrect: data.status === 'completed',
-          timestamp: data.updatedAt ? new Date(data.updatedAt).getTime() : Date.now()
-        };
-        if (data.hintsRevealed) {
-          hintsRevealed[chId] = data.hintsRevealed;
-        }
-      });
+      const totalXp = statsRow?.total_xp ?? 0;
+      const streakDays = statsRow?.current_streak ?? 1;
+      const lastActiveDate = statsRow?.last_activity_at ? formatDate(new Date(statsRow.last_activity_at)) : '';
 
       const loadedState: UserProgress = {
         totalXp,
@@ -77,25 +118,25 @@ export function useProgress() {
       setProgress(loadedState);
       saveUserProgress(loadedState);
     } catch (err: any) {
-      console.warn('Failed loading Firestore progress, using local cache:', err);
-      setSyncError('Using local session cache.');
+      console.warn('Failed loading Supabase PostgreSQL progress:', err);
+      setSyncError('Could not sync with Supabase PostgreSQL. Using local cached data.');
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [isConfigured]);
 
   useEffect(() => {
-    if (user && user.id) {
-      fetchFirestoreProgress(user.id);
+    if (user && isConfigured) {
+      fetchSupabaseProgress(user.id);
     }
-  }, [user, fetchFirestoreProgress]);
+  }, [user, isConfigured, fetchSupabaseProgress]);
 
-  // Sync state to localStorage whenever it changes
+  // Sync state to localStorage cache
   useEffect(() => {
     saveUserProgress(progress);
   }, [progress]);
 
-  // Record an answer submission
+  // Record challenge answer submission
   const recordSubmission = useCallback(
     async (
       challengeId: string,
@@ -105,6 +146,7 @@ export function useProgress() {
     ) => {
       const today = formatDate(new Date());
 
+      // Update in-memory state optimistically
       let updatedState: UserProgress = { ...progress };
 
       setProgress((prev) => {
@@ -151,39 +193,71 @@ export function useProgress() {
         return updatedState;
       });
 
-      // Remote Firestore persistence if user logged in
-      if (user && user.id) {
-        try {
-          const progressDocRef = doc(db, 'users', user.id, 'progress', challengeId);
-          await setDoc(progressDocRef, {
-            id: challengeId,
-            userId: user.id,
-            challengeId,
-            status: isCorrect ? 'completed' : 'attempted',
-            attempts: (progress.attempts[challengeId]?.totalAttempts || 0) + 1,
-            hintsRevealed: progress.hintsRevealed[challengeId] || 0,
-            completedAt: isCorrect ? new Date().toISOString() : null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
+      // Synchronize with Supabase PostgreSQL if authenticated
+      if (user && isConfigured && supabase) {
+        setIsSyncing(true);
+        setSyncError(null);
 
-          const userDocRef = doc(db, 'users', user.id);
-          await setDoc(userDocRef, {
-            totalXp: updatedState.totalXp,
-            streakDays: updatedState.streakDays,
-            completedChallenges: updatedState.completedChallengeIds.length,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        } catch (err) {
-          console.error('Remote save to Firestore failed:', err);
-          setSyncError('Stored locally.');
+        try {
+          // Attempt trusted server-side RPC function
+          const { data: rpcData, error: rpcErr } = await supabase.rpc('record_challenge_completion', {
+            p_challenge_id: challengeId,
+            p_is_correct: isCorrect,
+            p_xp_reward: xpReward,
+            p_option_id: optionId
+          });
+
+          if (rpcErr) {
+            console.warn('RPC record_challenge_completion failed, falling back to direct table write:', rpcErr);
+            
+            // Direct table write fallback with Row Level Security check
+            await supabase.from('user_progress').upsert({
+              user_id: user.id,
+              challenge_id: challengeId,
+              status: isCorrect ? 'completed' : 'attempted',
+              attempts: (progress.attempts[challengeId]?.totalAttempts || 0) + 1,
+              completed_at: isCorrect ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString()
+            });
+
+            await supabase.from('learning_stats').upsert({
+              user_id: user.id,
+              total_xp: updatedState.totalXp,
+              completed_challenges: updatedState.completedChallengeIds.length,
+              current_streak: updatedState.streakDays,
+              longest_streak: updatedState.streakDays,
+              last_activity_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+
+            await supabase.from('learning_activity').insert({
+              user_id: user.id,
+              activity_type: isCorrect ? 'challenge_completed' : 'challenge_attempt',
+              challenge_id: challengeId,
+              metadata: { is_correct: isCorrect, xp_awarded: isCorrect ? xpReward : 0, option_id: optionId }
+            });
+          } else if (rpcData) {
+            // Update stats from authoritative PostgreSQL server calculation
+            if (rpcData.total_xp !== undefined) {
+              setProgress((p) => ({
+                ...p,
+                totalXp: rpcData.total_xp,
+                streakDays: rpcData.current_streak || p.streakDays
+              }));
+            }
+          }
+        } catch (err: any) {
+          console.error('Remote save to Supabase PostgreSQL failed:', err);
+          setSyncError('Database sync failed. Submission saved locally.');
+        } finally {
+          setIsSyncing(false);
         }
       }
     },
-    [progress, user]
+    [progress, user, isConfigured]
   );
 
-  // Unlock / reveal a hint
+  // Reveal a hint
   const revealHint = useCallback(
     async (challengeId: string, currentHintLevel: number) => {
       setProgress((prev) => {
@@ -198,22 +272,30 @@ export function useProgress() {
         };
       });
 
-      if (user && user.id) {
+      if (user && isConfigured && supabase) {
         try {
-          const progressDocRef = doc(db, 'users', user.id, 'progress', challengeId);
-          await setDoc(progressDocRef, {
-            hintsRevealed: currentHintLevel,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
+          await supabase.from('user_progress').upsert({
+            user_id: user.id,
+            challenge_id: challengeId,
+            hints_revealed: currentHintLevel,
+            updated_at: new Date().toISOString()
+          });
+
+          await supabase.from('learning_activity').insert({
+            user_id: user.id,
+            activity_type: 'hint_revealed',
+            challenge_id: challengeId,
+            metadata: { hint_level: currentHintLevel }
+          });
         } catch (err) {
-          console.warn('Failed saving hint state to Firestore:', err);
+          console.warn('Failed saving hint state to Supabase:', err);
         }
       }
     },
-    [user]
+    [user, isConfigured]
   );
 
-  // Reset all progress
+  // Reset progress
   const resetProgress = useCallback(async () => {
     clearUserProgress();
     setProgress({
@@ -225,21 +307,38 @@ export function useProgress() {
       lastActiveDate: '',
       activeHistory: []
     });
+    setAchievements([]);
+    setRecentActivity([]);
 
-    if (user && user.id) {
+    if (user && isConfigured && supabase) {
+      setIsSyncing(true);
       try {
-        const userDocRef = doc(db, 'users', user.id);
-        await setDoc(userDocRef, {
-          totalXp: 0,
-          streakDays: 0,
-          completedChallenges: 0,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+        await supabase.from('user_progress').delete().eq('user_id', user.id);
+        await supabase.from('achievements').delete().eq('user_id', user.id);
+        await supabase.from('learning_activity').delete().eq('user_id', user.id);
+        await supabase.from('learning_stats').upsert({
+          user_id: user.id,
+          total_xp: 0,
+          completed_challenges: 0,
+          current_streak: 0,
+          longest_streak: 0,
+          last_activity_at: null,
+          updated_at: new Date().toISOString()
+        });
       } catch (err) {
-        console.error('Failed resetting Firestore progress:', err);
+        console.error('Failed resetting Supabase progress:', err);
+        setSyncError('Failed resetting database records on server.');
+      } finally {
+        setIsSyncing(false);
       }
     }
-  }, [user]);
+  }, [user, isConfigured]);
+
+  const retrySync = useCallback(async () => {
+    if (user && isConfigured) {
+      await fetchSupabaseProgress(user.id);
+    }
+  }, [user, isConfigured, fetchSupabaseProgress]);
 
   const totalSubmissions = Object.values(progress.attempts).reduce(
     (sum, a) => sum + a.totalAttempts,
@@ -262,8 +361,11 @@ export function useProgress() {
     accuracyPercent,
     isSyncing,
     syncError,
+    achievements,
+    recentActivity,
     recordSubmission,
     revealHint,
-    resetProgress
+    resetProgress,
+    retrySync
   };
 }
