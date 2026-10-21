@@ -1,0 +1,6 @@
+{
+  "summary":  "Implementation plan for BugTrail AI, an interactive educational debugging platform for C and Python featuring 12 curated challenges, progressive hints, verified solutions, local progress persistence, and an optional server-side Gemini AI Tutor panel.",
+  "updatedAt":  "2026-10-20T16:50:52.902079535Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

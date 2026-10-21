@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and stats for BugTrail AI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "email": { "type": "string", "description": "User email address" },
+        "photoURL": { "type": "string", "description": "User avatar photo URL" },
+        "totalXp": { "type": "number", "description": "Total XP earned" },
+        "streakDays": { "type": "number", "description": "Active streak in days" },
+        "completedChallenges": { "type": "number", "description": "Total challenges completed" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "totalXp", "streakDays"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "User progress for individual debugging challenges",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Progress record ID" },
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "challengeId": { "type": "string", "description": "Challenge identifier" },
+        "status": { "type": "string", "enum": ["attempted", "completed"] },
+        "attempts": { "type": "number" },
+        "hintsRevealed": { "type": "number" },
+        "completedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "challengeId", "status", "attempts"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents keyed by Auth UID"
+    },
+    "/users/{userId}/progress/{challengeId}": {
+      "schema": "UserProgress",
+      "description": "Subcollection of challenge completion records for a user"
+    }
+  }
+}

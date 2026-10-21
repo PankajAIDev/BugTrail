@@ -1,0 +1,6 @@
+{
+  "name": "BugTrail AI",
+  "description": "Interactive C and Python debugging learning platform with progressive hints, verified solutions, and an AI tutor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

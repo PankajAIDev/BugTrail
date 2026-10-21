@@ -1,0 +1,67 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // UserProfile schema validation
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['id', 'email', 'totalXp', 'streakDays']) &&
+             data.keys().hasOnly(['id', 'displayName', 'email', 'photoURL', 'totalXp', 'streakDays', 'completedChallenges', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.totalXp is number && data.totalXp >= 0 &&
+             data.streakDays is number && data.streakDays >= 0;
+    }
+
+    // UserProgress schema validation
+    function isValidUserProgress(data) {
+      return data.keys().hasAll(['userId', 'challengeId', 'status', 'attempts']) &&
+             data.keys().hasOnly(['id', 'userId', 'challengeId', 'status', 'attempts', 'hintsRevealed', 'completedAt', 'createdAt', 'updatedAt']) &&
+             data.userId is string && data.userId.size() <= 128 &&
+             data.challengeId is string && data.challengeId.size() <= 128 &&
+             (data.status == 'attempted' || data.status == 'completed') &&
+             data.attempts is number && data.attempts >= 0;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(incoming());
+      allow update: if isOwner(userId) && isValidUserProfile(incoming()) && incoming().id == existing().id;
+
+      // User Progress Subcollection
+      match /progress/{challengeId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidUserProgress(incoming());
+        allow update: if isOwner(userId) && isValidUserProgress(incoming()) && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}
